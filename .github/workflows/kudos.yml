@@ -1,0 +1,120 @@
+name: Strava Auto Kudos Cookies Scraping
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [spust_presny_cron]
+
+jobs:
+  kudos:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Playwright and dependencies
+        run: |
+          pip install playwright requests
+          playwright install chromium --with-deps
+
+      - name: Run Kudos Cookie Script
+        env:
+          STRAVA_COOKIE: ${{ secrets.STRAVA_COOKIE }}
+        run: |
+          cat << 'EOF' > run_kudos.py
+          import os, time, random
+          from playwright.sync_api import sync_playwright
+
+          cookie_value = os.environ.get('STRAVA_COOKIE')
+          if not cookie_value:
+              print('Chyba: Chybí STRAVA_COOKIE v Secrets!')
+              exit(1)
+
+          MAX_TOTAL_KUDOS = random.randint(20, 40)
+          total_kudos_given = 0
+
+          main_feed = ['https://www.strava.com/dashboard?feed_type=following']
+
+          club_urls = [
+              'https://www.strava.com/dashboard?club_id=166151&feed_type=club&num_entries=40',
+              'https://www.strava.com/dashboard?club_id=3812&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=239179&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=1235645&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=962674&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=1030933&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=1648309&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=46427&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=1065731&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=534773&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=565379&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=299993&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=599801&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=1149689&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=1254256&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=932688&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=1704884&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=276029&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=532584&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=205964&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=2058548&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=1048584&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=1189744&feed_type=club',
+              'https://www.strava.com/dashboard?club_id=5854&feed_type=club'
+          ]
+
+          random.shuffle(club_urls)
+          urls_to_check = main_feed + club_urls
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              context = browser.new_context(viewport={'width': 1280, 'height': 800})
+              context.add_cookies([{
+                  'name': '_strava4_session',
+                  'value': cookie_value,
+                  'domain': '.strava.com',
+                  'path': '/'
+              }])
+              page = context.new_page()
+              for url in urls_to_check:
+                  if total_kudos_given >= MAX_TOTAL_KUDOS:
+                      print(f'\n[STOP] Dosažen celkový strop {MAX_TOTAL_KUDOS} kudos.')
+                      break
+                  print(f'\n--- Prohlížím stránku: {url} ---')
+                  if page.url != url:
+                      page.goto(url)
+                      time.sleep(5)
+                  if 'login' in page.url:
+                      print('Chyba: Prohlížeč byl přesměrován na přihlášení. Cookie vypršela.')
+                      break
+                  buttons = page.query_selector_all('button[data-testid="kudos_button"], button[title="Give kudos"], button:has-text("👍")')
+                  print(f'Nalezeno {len(buttons)} tlačítek pro kudos.')
+                  clicked_count = 0
+                  for btn in buttons:
+                      if total_kudos_given >= MAX_TOTAL_KUDOS:
+                          break
+                      svg = btn.query_selector('svg')
+                      is_filled = False
+                      if svg:
+                          fill_attr = svg.get_attribute('fill')
+                          if fill_attr and fill_attr != 'none' and 'currentColor' not in fill_attr:
+                              is_filled = True
+                      if not is_filled:
+                          try:
+                              btn.scroll_into_view_if_needed()
+                              btn.click(timeout=3000)
+                              clicked_count += 1
+                              total_kudos_given += 1
+                              print(f'  [OK] Kliknuto (Celkem: {total_kudos_given}/{MAX_TOTAL_KUDOS})')
+                              time.sleep(random.uniform(3, 7))
+                          except Exception:
+                              pass
+                  print(f'Na této stránce doklikáno {clicked_count} palců.')
+              browser.close()
+              print(f'\nHotovo! Celkem rozdáno {total_kudos_given} kudos.')
+          EOF
+          python run_kudos.py
